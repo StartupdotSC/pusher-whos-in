@@ -1,7 +1,7 @@
 
 .container{:"ng-controller" => "AppCtrl"}
 
-  
+
   = partial :_new_user
 
   .row
@@ -19,7 +19,7 @@
       .hexagons{:"ng-repeat" => "person in people"}
         .hex{:"ng-style" => "{'background-image': 'url({{person.gravatar}})'}", :"ng-class" => "{'hex-gap': shouldCreateGap($index), 'absent': !person.present}", :"data-target" => "$last ? '#myModal' : '' ", :"data-toggle" => "$last ? 'modal' : ''"}
 
-          %a{href:"#", tooltip: "{{person.name}} is {{ person.present ? 'in!' : 'away' }} Last Seen: {{person.last_seen | date:'short'}}", :"ng-hide" => "$last"}
+          %a{href:"#", tooltip: "{{person.name}} is {{ person.present ? 'in!' : 'away' }} Last Seen on {{person.last_seen | date:'short'}} at {{person.location}}", :"ng-hide" => "$last"}
 
           %a{:"ng-show" => "$last",  "data-target" => "#myModal", "data-toggle" => "modal"}
           .corner-1

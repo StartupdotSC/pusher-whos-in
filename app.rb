@@ -6,6 +6,7 @@ require "gravatar-ultimate"
 require './lib/render_partial'
 require 'pusher'
 require 'mongo'
+require 'faraday'
 
 Pusher.url = ENV["PUSHER_URL"]
 
@@ -25,17 +26,17 @@ end
 include Mongo
 
 configure do
-	if !ENV['MONGOLAB_URI']
-	  conn = MongoClient.new("localhost", 27017)
-	  set :mongo_connection, conn
-	  set :mongo_db, conn.db('whos_in')
+  if !ENV['MONGOLAB_URI']
+    conn = MongoClient.new("localhost", 27017)
+    set :mongo_connection, conn
+    set :mongo_db, conn.db('whos_in')
   else
-		mongo_uri = ENV['MONGOLAB_URI']
-		db_name = mongo_uri[%r{/([^/\?]+)(\?|$)}, 1]
-		client = MongoClient.from_uri(mongo_uri)
-		db = client.db(db_name)
-		set :mongo_connection, client
-		set :mongo_db, db
+    mongo_uri = ENV['MONGOLAB_URI']
+    db_name = mongo_uri[%r{/([^/\?]+)(\?|$)}, 1]
+    client = MongoClient.from_uri(mongo_uri)
+    db = client.db(db_name)
+    set :mongo_connection, client
+    set :mongo_db, db
   end
 
   # Configure Slack Integration
@@ -59,44 +60,64 @@ get '/' do
 end
 
 post '/people' do
-	protected!
-	addresses = JSON.parse(request.body.read).map(&:values).flatten
-	people = update_people_from addresses
-	Pusher['people_channel'].trigger('people_event', people)
+  protected!
+  location = params[:location]
+  addresses = JSON.parse(request.body.read).map(&:values).flatten
+  people = update_people_from addresses, location
+  Pusher['people_channel'].trigger('people_event', people)
 end
 
 post '/users/new' do
-	user_data = JSON.parse(request.body.read)
-	user_data["gravatar"], user_data["last_seen"] = Gravatar.new(user_data["email"]).image_url, Time.new(0)
-	settings.mongo_db['users'].insert user_data
-	{success: 200}.to_json
+  user_data = JSON.parse(request.body.read)
+  user_data["gravatar"], user_data["last_seen"] = Gravatar.new(user_data["email"]).image_url, Time.new(0)
+  settings.mongo_db['users'].insert user_data
+  {success: 200}.to_json
 end
 
-def status_by addresses
-	Proc.new { |person| is_included_in_list?(person, addresses) ? set_presence_of(person, true) : inactive_for_ten_minutes?(person) ? set_presence_of(person, false) : nil }
+def status_by addresses, location
+  Proc.new { |person|
+    if is_included_in_list?(person, addresses)
+      set_presence_of(person, true, location)
+    else
+      if inactive_for_ten_minutes?(person)
+        set_presence_of(person, false)
+      end
+    end
+  }
 end
 
 def is_included_in_list? person, addresses
-	addresses.include? person["mac"].upcase
+  addresses.include? person["mac"].upcase
 end
 
 def inactive_for_ten_minutes? person
-	Time.now >= (person["last_seen"] + 10*60)
+  Time.now >= (person["last_seen"] + 10*60)
 end
 
-def set_presence_of person, status
-	insertion = status ? {"last_seen" => Time.now, "present" => true} : {"present" => false }
-	settings.people.update({"_id" => person["_id"]}, {"$set" => insertion})
-  notify_slack person if status == true
+def set_presence_of person, status, location=nil
+  if person['present'] == false && status
+    notify_slack person, true
+  elsif person['present'] == true && !status
+    notify_slack person, false
+  end
+
+  insertion = status ? {"last_seen" => Time.now, "present" => true, "location" => location} : {"present" => false }
+  settings.people.update({"_id" => person["_id"]}, {"$set" => insertion})
 end
 
-def update_people_from addresses
-	settings.people.find.map(&status_by(addresses)) and return settings.people.find.to_a
+def update_people_from addresses, location
+  settings.people.find.map(&status_by(addresses, location))
+  return settings.people.find.to_a
 end
 
-def notify_slack person
-  if settings.slack_webhook_url && inactive_for_ten_minutes?(person)
-    payload = { text: "#{person['name']} has arrived!" }
+def notify_slack person, present
+  if settings.slack_webhook_url
+    if present
+      payload = { text: "#{person['name']} has arrived!" }
+    else
+      payload = { text: "#{person['name']} has left the building." }
+    end
+
     slack_connection.post settings.slack_webhook_url, payload.to_json
   end
 end
