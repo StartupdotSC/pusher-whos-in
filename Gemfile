@@ -22,3 +22,4 @@ gem 'bson_ext'
 # gem 'mongoid'
 
 gem 'pusher'
+gem 'faraday'

@@ -7,7 +7,6 @@ require './lib/render_partial'
 require 'pusher'
 require 'mongo'
 
-
 Pusher.url = ENV["PUSHER_URL"]
 
 helpers do
@@ -38,6 +37,9 @@ configure do
 		set :mongo_connection, client
 		set :mongo_db, db
   end
+
+  # Configure Slack Integration
+  set :slack_webhook_url, ENV['SLACK_WEBHOOK_URL']
 end
 
 
@@ -63,7 +65,7 @@ post '/people' do
 	Pusher['people_channel'].trigger('people_event', people)
 end
 
-post '/users/new' do 
+post '/users/new' do
 	user_data = JSON.parse(request.body.read)
 	user_data["gravatar"], user_data["last_seen"] = Gravatar.new(user_data["email"]).image_url, Time.new(0)
 	settings.mongo_db['users'].insert user_data
@@ -85,8 +87,26 @@ end
 def set_presence_of person, status
 	insertion = status ? {"last_seen" => Time.now, "present" => true} : {"present" => false }
 	settings.people.update({"_id" => person["_id"]}, {"$set" => insertion})
+  notify_slack person if status == true
 end
 
 def update_people_from addresses
 	settings.people.find.map(&status_by(addresses)) and return settings.people.find.to_a
+end
+
+def notify_slack person
+  if settings.slack_webhook_url && inactive_for_ten_minutes?(person)
+    payload = { text: "#{person['name']} has arrived!" }
+    slack_connection.post settings.slack_webhook_url, payload.to_json
+  end
+end
+
+private
+
+def slack_connection
+  Faraday.new do |faraday|
+    faraday.headers['Content-Type'] = 'application/json'
+    faraday.headers['Content-Encoding'] = 'UTF-8'
+    faraday.adapter Faraday.default_adapter
+  end
 end
