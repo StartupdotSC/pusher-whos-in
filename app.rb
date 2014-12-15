@@ -113,9 +113,9 @@ end
 def notify_slack person, present
   if settings.slack_webhook_url
     if present
-      payload = { text: "#{person['name']} has arrived!" }
+      payload = { text: "#{person['name']} has arrived at #{person['location']}!" }
     else
-      payload = { text: "#{person['name']} has left the building." }
+      payload = { text: "#{person['name']} has left #{person['location']}." }
     end
 
     slack_connection.post settings.slack_webhook_url, payload.to_json
